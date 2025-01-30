@@ -156,7 +156,7 @@ What action should you take? Respond ONLY with the action you want to take, exac
         actionable_object = "none"
         if grid[3, 5, 0] > 2:
             actionable_object = (
-                f"{IDX_TO_COLOR[grid[3, 6, 1]]} {IDX_TO_OBJECT[grid[3, 6, 0]]}"
+                f"{IDX_TO_COLOR[grid[3, 5, 1]]} {IDX_TO_OBJECT[grid[3, 5, 0]]}"
             )
         holding_object = "none"
         if grid[3, 6, 0] > 2:
