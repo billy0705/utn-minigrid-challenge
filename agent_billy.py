@@ -111,6 +111,7 @@ Environmental Rules:
   * Objects are solid and must be navigated around
   * Each action moves exactly one cell or rotates 90 degrees
   
+  
 - Object Interaction Rules:
   * Keys:
     - Can be picked up when it is only 1 cell in front of you
