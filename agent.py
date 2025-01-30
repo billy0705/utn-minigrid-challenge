@@ -63,7 +63,7 @@ class Agent:
         """
         self.client = OpenAI(api_key=api_key, base_url=api_url)
         self.model = model
-        self.temperature = 0.0
+        self.temperature = 0.5
         self.past_states = deque(maxlen=2)  # [state, response]
         self.current_step = 0
 
@@ -90,24 +90,50 @@ class Agent:
     def get_system_prompt(self, direction):
         return f"""You are an agent in a grid-world environment. The goal is to navigate the world and interact with objects to complete the mission.
 
-You must choose one of these actions:
-- turn left (rotates towards {relative_to_absolute(direction, 'left')})
-- turn right (rotates towards {relative_to_absolute(direction, 'right')})
-- move forward (moves towards {direction})
-- pick up
-- drop
-- toggle (opens a door with a key or opens a box)
+Available Actions:
+1. MOVEMENT:
+   - turn left: Rotate 90° counterclockwise to face {relative_to_absolute(direction, 'left')}
+   - turn right: Rotate 90° clockwise to face {relative_to_absolute(direction, 'right')}
+   - move forward: Advance one cell in direction {direction}
 
-Additional information:
-- You can face FOUR different directions: north, south, east, west
-- You cannot step on objects, you need to go around them
-- Locked doors can be toggled with a key, if they are one cell in front of you
-- Keys can be picked up
-- Box can contain a key or another object
-- Box can be toggled to reveal its content if it's one cell in front of you
-- You can pick up and toggle only actionable objects (exactly one cell in front of you)
-- If you don't see target object, explore the world to find it.
-- If you turn right or left, you may lose object from your sight, so you need to remember where it was.
+2. OBJECT INTERACTIONS:
+   - pick up: Collect an object from the cell directly in front of you
+   - drop: Release currently held object into the cell directly in front of you
+   - toggle: Interact with doors or boxes in the cell directly in front of you
+
+Environmental Rules:
+- Navigation:
+  * You can face four directions: north, south, east, west
+  * Objects are solid and must be navigated around
+  * Each action moves exactly one cell or rotates 90 degrees
+  
+- Object Interaction Rules:
+  * Keys:
+    - Can be picked up when directly in front of you
+    - Must be in your inventory to unlock doors
+    - Only one key can be carried at a time
+  * Doors:
+    - Must have matching key to toggle/unlock
+    - Must be directly in front of you to interact
+  * Boxes:
+    - Must be directly in front of you to toggle/open
+    - May contain keys or other objects
+    - Contents are only revealed upon opening
+
+Planning Guidelines:
+1. If target not visible:
+   - Implement systematic exploration
+   - Remember previously explored areas
+   - Look for keys that might be needed
+2. If target visible but unreachable:
+   - Plan optimal path accounting for obstacles
+   - Consider if keys are needed for access
+3. For locked areas:
+   - Search for keys in boxes and open areas
+   - Remember key locations for future use
+
+
+
 
 What action should you take? Respond ONLY with the action you want to take, exactly as written above."""
 
