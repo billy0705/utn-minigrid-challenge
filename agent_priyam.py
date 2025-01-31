@@ -66,6 +66,8 @@ class Agent:
         self.temperature = 0.5
         self.past_states = deque(maxlen=2)  # [state, response]
         self.current_step = 0
+        self.coordinate = (0, 0)
+        self.objects_coordinates = {}
 
         # System prompt to explain the task
 
@@ -87,9 +89,15 @@ class Agent:
 
         return action_idx, found_action
 
-    def get_system_prompt(self, direction):
+    def get_system_prompt(self, direction, mission):
+        objs = ""
+        if len(self.objects_coordinates) > 0:
+            objs = "\n".join([f" * {v} is at {k}" for k, v in self.objects_coordinates.items()])
         return f"""You are an agent in a grid-world environment.Complete missions interacting with ONLY object mentioned in the Mission.
-
+Mission: 
+{mission}
+Objects found in the environment:
+{objs}
 Available Actions:
 1. MOVEMENT:
    - turn left: Rotate 90° counterclockwise to face {relative_to_absolute(direction, 'left')}
@@ -147,7 +155,7 @@ Planning Guidelines:
 
 
 
-What action should you take? Respond ONLY with the action you want to take, exactly as metioned in available actions."""
+Think about how to solve the mission?  Think about the priority things to do. Give me what you are thinking and why you are taking this action. At the end give me the next step action. After this action, don't give me anything else."""
 
     def parse_observation(self, obs: Dict[str, Any], mission: str) -> str:
         """
@@ -190,6 +198,23 @@ What action should you take? Respond ONLY with the action you want to take, exac
                         obj_pos += f" {6 - y} cells in the front"
                     obj_repr = obj_repr + obj_pos
                     visible_objects.append(obj_repr)
+                    obj_name = f"{obj_state}{IDX_TO_COLOR[color_id]} {IDX_TO_OBJECT[obj_id]}"
+                    if direction == "west":
+                        obj_x = self.coordinate[0] - (6 - y)
+                        obj_y = self.coordinate[1] - (3 - x)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
+                    elif direction == "south":
+                        obj_x = self.coordinate[0] + (3 - x)
+                        obj_y = self.coordinate[1] - (6 - y)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
+                    elif direction == "east":
+                        obj_x = self.coordinate[0] + (6 - y)
+                        obj_y = self.coordinate[1] + (3 - x)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
+                    elif direction == "north":
+                        obj_x = self.coordinate[0] - (3 - x)
+                        obj_y = self.coordinate[1] + (6 - y)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
 
         actionable_object = "none"
         if grid[3, 5, 0] > 2:
@@ -242,7 +267,7 @@ Response:"""
             Action index
         """
         prompt, current_state, direction = self.parse_observation(obs, mission)
-        final_prompt = f"{self.get_system_prompt(direction)}\n\n{prompt}"
+        final_prompt = f"{self.get_system_prompt(direction, mission)}\n\n{prompt}"
 
         response = self.client.chat.completions.create(
             model=self.model,
