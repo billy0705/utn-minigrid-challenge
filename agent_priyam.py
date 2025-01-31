@@ -63,7 +63,7 @@ class Agent:
         """
         self.client = OpenAI(api_key=api_key, base_url=api_url)
         self.model = model
-        self.temperature = 0.0
+        self.temperature = 0.5
         self.past_states = deque(maxlen=2)  # [state, response]
         self.current_step = 0
 
@@ -88,7 +88,7 @@ class Agent:
         return action_idx, found_action
 
     def get_system_prompt(self, direction):
-        return f"""You are an agent in a grid-world environment. The goal is to navigate the world and interact with objects to complete the mission.
+        return f"""You are an agent in a grid-world environment.Complete missions interacting with ONLY object mentioned in the Mission.
 
 Available Actions:
 1. MOVEMENT:
@@ -100,7 +100,11 @@ Available Actions:
 2. OBJECT INTERACTIONS:
    - pick up: Collect an object from the cell directly in front of you
    - drop: Release currently held object into the cell directly in front of you
-   - toggle: Interact with doors or boxes in the cell directly in front of you
+   - toggle: Open doors or boxes in the cell directly in front of you
+
+
+You can only Select the 6 actions mentioned above!
+
 
 Environmental Rules:
 - Navigation:
@@ -108,12 +112,14 @@ Environmental Rules:
   * Objects are solid and must be navigated around
   * Each action moves exactly one cell or rotates 90 degrees
   * If movement is blocked, consider turning or backtracking instead of repeating the same action
+  * Do not turn left immediately after turning right (or vice versa) to avoid turning in place.
   
 - Object Interaction Rules:
   * Keys:
-    - Can be picked up when directly in front of you
+    - Can be picked up only when  directly in front of you
     - Must be in your inventory to unlock doors
     - Only one key can be carried at a time
+    - If holding a key, toggle if and only if the door is 1 cell infront; for other cases don't select toggle as a response.
   * Doors:
     - Must have matching key to toggle/unlock
     - Must be directly in front of you to interact
@@ -128,7 +134,6 @@ Planning Guidelines:
 1. If target not visible:
    - Implement systematic exploration
    - Remember previously explored areas
-   - Look for keys that might be needed
 2. If target visible but unreachable:
    - Plan optimal path accounting for obstacles
    - Consider if keys are needed for access
@@ -137,11 +142,12 @@ Planning Guidelines:
    - If stuck in front of door, turn around and explore behind
    - Remember key locations for future use
    - After picking up a key, move to the corresponding door before attempting to toggle
+   - If in front of a locked door without a key, do not move forward; instead, turn and explore.
+  
 
 
 
-
-What action should you take? Respond ONLY with the action you want to take, exactly as written above."""
+What action should you take? Respond ONLY with the action you want to take, exactly as metioned in available actions."""
 
     def parse_observation(self, obs: Dict[str, Any], mission: str) -> str:
         """
