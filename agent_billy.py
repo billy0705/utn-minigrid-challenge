@@ -90,40 +90,54 @@ class Agent:
         return action_idx, found_action
 
     def get_system_prompt(self, direction, mission):
+        objs = ""
+        if len(self.objects_coordinates) > 0:
+            objs = "\n".join([f" * {v} is at {k}" for k, v in self.objects_coordinates.items()])
+        forward_coordate = (self.coordinate[0] + (1 if direction == "east" else -1 if direction == "west" else 0),
+                            self.coordinate[1] + (-1 if direction == "south" else 1 if direction == "north" else 0))
         return f"""You are an agent in a grid-world environment. The goal is to navigate the world and interact with objects to complete the mission.
 Mission: 
 {mission}
+Objects found in the environment:
+{objs}
         
 Available Actions:
 1. MOVEMENT:
    - turn left: Rotate 90° counterclockwise to face {relative_to_absolute(direction, 'left')}
    - turn right: Rotate 90° clockwise to face {relative_to_absolute(direction, 'right')}
-   - move forward: Advance one cell in direction {direction}
+   - move forward: Advance one cell in direction {direction}, if you choose this action the next coordinate is {forward_coordate}
 
 2. OBJECT INTERACTIONS:
-   - pick up: Collect an object from 1 cell in front of you and distance should be 1 cell
-   - drop: Release currently held object into the cell directly in front of you and distance should be 1
-   - toggle: Interact with doors or boxes 1 cell in front of you and distance should be 1
+   - pick up: Collect an object from 1 cell in front of agent
+   - drop: Release currently held object into the cell directly in front of agent
+   - toggle: Interact with doors or boxes 1 cell in front of agent
 
 Environmental Rules:
 - Navigation:
   * You can face four directions: north, south, east, west
+  * x-asix is horizontal (east or west) and y-axis is vertical (north or south)
+  * x-axis positive is east, y-axis positive is north
+  * y-axis negative is south, x-axis negative is west
+  * Don't do the object interaction if it is not 1 cell in front of you or there is no object
   * Objects are solid and must be navigated around
   * Each action moves exactly one cell or rotates 90 degrees
+  * Don't move forward or turn to the walls or closed doors
   
   
 - Object Interaction Rules:
+  Important: **Every Interaction must be directly in front of an object (not 1 cell left or right) to interact with it**
   * Keys:
     - Can be picked up when it is only 1 cell in front of you
     - Must be in your inventory to unlock doors
     - Only one key can be carried at a time
   * Doors:
-    - Must have matching key to toggle/unlock
+    - Must have matching key to toggle, only toggle it when door is 1 cell in front of you
     - Must be directly in front of you to interact
   * Boxes:
-    - Must be only 1 cell in front of you to toggle/open
+    - Must be 1 cell in front of you to toggle, must facing to the box
     - May contain keys or other objects
     - Contents are only revealed upon opening
+    - You can only pick up boxes if you have no object in your hand
 
 Planning Guidelines:
 1. If target not visible:
@@ -132,11 +146,14 @@ Planning Guidelines:
 2. If target visible but unreachable:
    - Plan optimal path accounting for obstacles
    - Consider if keys are needed for access
-3. For locked areas/doors:
-   - Search for keys in boxes and open areas
+3. For locked doors:
    - Prioritize to search for keys before attempting to unlock doors
+   - Search for keys in boxes and open areas
+   - Once open door, don't close it
+4. Same Observation:
+    - Don't repeat the same action
 
-What action should you take? Give me some reasons of why you are taking this action and one action at the end."""
+Think about how to solve the mission?  Think about the priority things to do. Give me what you are thinking and why you are taking this action. At the end give me the next step action. After this action, don't give me anything else."""
 
     def parse_observation(self, obs: Dict[str, Any], mission: str) -> str:
         """
@@ -156,6 +173,15 @@ What action should you take? Give me some reasons of why you are taking this act
         # Parse the grid to find visible objects
         visible_objects = []
         grid = obs["image"]
+        # print(f"{grid[:,:,0]=}")
+        # print(f"{self.coordinate=}")
+        infront = ""
+        if grid[3, 5, 0] == 2:
+            infront = "wall"
+        elif grid[3, 5, 0] > 2:
+            infront = f"{IDX_TO_COLOR[grid[3, 5, 1]]} {IDX_TO_OBJECT[grid[3, 5, 0]]}"
+        elif grid[3, 5, 0] == 1:
+            infront = "empty cell"
 
         # Convert object types to descriptions
         for x in range(7):
@@ -167,7 +193,8 @@ What action should you take? Give me some reasons of why you are taking this act
                     obj_state = ""
                     if obj_id == 4:  # it's a door
                         obj_state = f"{IDX_TO_STATE[door_state]} "
-                    obj_repr = f"\n * {obj_state}{IDX_TO_COLOR[color_id]} {IDX_TO_OBJECT[obj_id]} -"
+                    obj_name = f"{obj_state}{IDX_TO_COLOR[color_id]} {IDX_TO_OBJECT[obj_id]}"
+                    obj_repr = f"\n * {obj_name} -"
                     obj_pos = ""
                     distance = abs(x - 3) + abs(y - 6)
                     if x < 3:
@@ -180,6 +207,22 @@ What action should you take? Give me some reasons of why you are taking this act
                         obj_pos += f" {6 - y} cells in the front"
                     obj_repr = obj_repr + obj_pos + f" ({distance} cells away)"
                     visible_objects.append(obj_repr)
+                    if direction == "west":
+                        obj_x = self.coordinate[0] - (6 - y)
+                        obj_y = self.coordinate[1] - (3 - x)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
+                    elif direction == "south":
+                        obj_x = self.coordinate[0] + (3 - x)
+                        obj_y = self.coordinate[1] - (6 - y)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
+                    elif direction == "east":
+                        obj_x = self.coordinate[0] + (6 - y)
+                        obj_y = self.coordinate[1] + (3 - x)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
+                    elif direction == "north":
+                        obj_x = self.coordinate[0] - (3 - x)
+                        obj_y = self.coordinate[1] + (6 - y)
+                        self.objects_coordinates[(obj_x, obj_y)] = obj_name
 
         actionable_object = "none"
         if grid[3, 5, 0] > 2:
@@ -202,21 +245,36 @@ What action should you take? Give me some reasons of why you are taking this act
         if len(walls) == 0:
             walls.append("none")
 
+        Wall_info = "No wall around"
+        if grid[2, 6, 0] == 2:
+            if Wall_info == "No wall around":
+                Wall_info = "Wall on the left"
+        elif grid[4, 6, 0] == 2:
+            if Wall_info == "No wall around":
+                Wall_info = "Wall on the right"
+            else:
+                Wall_info += f", Wall on the right"
+        elif grid[3, 5, 0] == 2:
+            if Wall_info == "No wall around":
+                Wall_info = f"Wall in front"
+            else:
+                Wall_info += f", Wall in front"
+
         # Create the prompt
         past_states_str = "\n".join(self.past_states)
         current_state = f"""[Step {self.current_step}]
 - Agent position: {self.coordinate}
 - Facing '{direction}'
-- Wall on the left: {"yes" if grid[2, 6, 0] == 2 else "no"}
-- Wall on the right: {"yes" if grid[4, 6, 0] == 2 else "no"}
-- Wall in front (blocking): {"yes" if grid[3, 5, 0] == 2 else "no"}
+- Wall infomation: {Wall_info}
+- Cell in front: {infront}
 - Visible objects: {', '.join(visible_objects) if visible_objects else 'none'}
 - Actionable object: {actionable_object}
 - Holding object: {holding_object}"""
-        prompt = f"""Recent states:
+        prompt = f"""Current observation:
+        {current_state}
+        Previous observations:
 {past_states_str}
-{current_state}
-Response:"""
+"""
 
         return prompt, current_state, direction
 
@@ -271,11 +329,11 @@ Response:"""
             "action_text": action_text,
         }
         if action_idx == 2:
-            if obs["image"][3, 5, 0] != 2:
-            self.coordinate = (
-                self.coordinate[0] + (-1 if direction == "south" else 1 if direction == "north" else 0),
-                self.coordinate[1] + (1 if direction == "east" else -1 if direction == "west" else 0),
-            )
+            if obs["image"][3, 5, 0] < 2:
+                self.coordinate = (
+                    self.coordinate[0] + (1 if direction == "east" else -1 if direction == "west" else 0),
+                    self.coordinate[1] + (-1 if direction == "south" else 1 if direction == "north" else 0),
+                )
 
         return action_idx, metadata
 
